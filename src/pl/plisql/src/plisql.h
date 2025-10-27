@@ -1074,6 +1074,7 @@ typedef struct PLiSQL_function
 	bool		fn_no_return;	/* when the function return type is not VOIDOID, if the body has not a RETURN statment,
 					 * the CREATE FUNCTION can execute successfully, but when the function is called,
 					 * an error will be reported */
+	bool		do_from_call;
 	char		**paramnames;	/* saved do + using parameter'name */
 } PLiSQL_function;
 
@@ -1324,7 +1325,7 @@ extern List *plisql_referenced_objects;	/*the elements in list are ObjectAddress
 extern PGDLLEXPORT PLiSQL_function *plisql_compile(FunctionCallInfo fcinfo,
 													 bool forValidator);
 
-extern PLiSQL_function *plisql_compile_inline(char *proc_source, ParamListInfo inparams);
+extern PLiSQL_function *plisql_compile_inline(char *proc_source, ParamListInfo inparams, bool fromcall);
 extern PGDLLEXPORT void plisql_parser_setup(struct ParseState *pstate,
 								 PLiSQL_expr *expr);
 extern bool plisql_parse_word(char *paramname, char *word1, const char *yytxt, bool lookup,
