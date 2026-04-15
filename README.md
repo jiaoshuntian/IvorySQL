@@ -81,7 +81,7 @@ ninja -C build
 Note: Meson requires a clean source tree. If you previously ran `./configure`,
 run `make distclean` first.
 
-## Developer Formatting hooks and CI:
+## Developer Formatting hooks and CI
 - A pre-commit formatting hook is provided at `.githooks/pre-commit`. Enable it with `git config core.hooksPath .githooks`, or run `make code-format` (equivalently `bash tools/enable-git-hooks.sh`).
 - The hook depends only on in-tree tools `src/tools/pgindent` and `src/tools/pg_bsd_indent`. On commit it formats staged C/C++ files with pgindent and re-adds them to the staged area. 
 - A Cirrus workflow `FormatCheck` runs `pgindent --check` on files changed in a PR.
