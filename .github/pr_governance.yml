@@ -1,0 +1,157 @@
+name: pr-governance
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+      - labeled
+      - unlabeled
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  policy:
+    name: policy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate PR governance policy
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const body = pr.body || "";
+            const title = (pr.title || "").trim();
+
+            const errors = [];
+            const warnings = [];
+
+            // ----------------------------
+            // 1) 关联 Issue
+            // GitHub 官方支持关键字关联并自动关闭 issue:
+            // Closes #123 / Fixes #123 / Resolves #123
+            // ----------------------------
+            const closingRegex =
+              /\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\s*:?\s+(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+\b/i;
+            const issueRefRegex =
+              /(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#\d+\b/g;
+
+            if (!closingRegex.test(body)) {
+              errors.push("必须在 PR 描述中通过关闭关键字关联 Issue，例如：`Closes #123`。");
+            }
+
+            const refs = body.match(issueRefRegex) || [];
+            const sameRepoIssueNums = [];
+            for (const ref of refs) {
+              const m = ref.match(/^#(\d+)$/);
+              if (m) sameRepoIssueNums.push(Number(m[1]));
+            }
+
+            if (sameRepoIssueNums.length === 0) {
+              warnings.push("没有检测到同仓库 Issue 编号；如果是跨仓库 issue，请确认写法为 `owner/repo#123`。");
+            }
+
+            // ----------------------------
+            // 2) PR / Issue 关联 Project
+            // 这里检查：
+            // - 当前 PR 是否在至少一个 Project 中
+            // - 关联的同仓库 issue 是否都在至少一个 Project 中
+            // ----------------------------
+            async function getProjectCountForContent(nodeId) {
+              const query = `
+                query($id: ID!) {
+                  node(id: $id) {
+                    ... on PullRequest {
+                      projectItems(first: 20) { totalCount }
+                    }
+                    ... on Issue {
+                      projectItems(first: 20) { totalCount }
+                    }
+                  }
+                }
+              `;
+              const res = await github.graphql(query, { id: nodeId });
+              const node = res.node;
+              if (!node) return 0;
+              return node.projectItems?.totalCount || 0;
+            }
+
+            const prProjectCount = await getProjectCountForContent(pr.node_id);
+            if (prProjectCount < 1) {
+              errors.push("PR 未关联任何 Project。");
+            }
+
+            for (const issueNumber of sameRepoIssueNums) {
+              try {
+                const { data: issue } = await github.rest.issues.get({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                });
+
+                if (issue.pull_request) {
+                  continue; // 跳过引用到 PR 的情况
+                }
+
+                const issueProjectCount = await getProjectCountForContent(issue.node_id);
+                if (issueProjectCount < 1) {
+                  errors.push(`关联的 Issue #${issueNumber} 未关联任何 Project。`);
+                }
+              } catch (e) {
+                warnings.push(`无法读取关联的 Issue #${issueNumber}，请确认引用有效。`);
+              }
+            }
+
+            // ----------------------------
+            // 3) Review 完成
+            // 这部分更建议由 branch protection / ruleset 强制
+            // 这里做辅助提示，不代替原生保护
+            // ----------------------------
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number: pr.number,
+              per_page: 100,
+            });
+
+            const approvedReviews = reviews.filter(r => r.state === "APPROVED");
+            if (approvedReviews.length < 1) {
+              warnings.push("当前没有检测到 APPROVED review。建议同时启用分支保护中的 required reviews。");
+            }
+
+            const summary = [];
+            summary.push("## PR Governance Report");
+            summary.push(`- PR #${pr.number}`);
+            summary.push(`- Title: ${title}`);
+            summary.push(`- PR project count: ${prProjectCount}`);
+            summary.push(`- Files changed: ${pr.changed_files}`);
+            summary.push(`- Additions: ${pr.additions}`);
+            summary.push(`- Deletions: ${pr.deletions}`);
+            summary.push("");
+
+            if (warnings.length) {
+              summary.push("### Warnings");
+              for (const w of warnings) summary.push(`- ${w}`);
+              summary.push("");
+            }
+
+            if (errors.length) {
+              summary.push("### Errors");
+              for (const e of errors) summary.push(`- ${e}`);
+              await core.summary.addRaw(summary.join("\n")).write();
+              core.setFailed(errors.join(" | "));
+              return;
+            }
+
+            summary.push("### Result");
+            summary.push("- All required governance checks passed.");
+            await core.summary.addRaw(summary.join("\n")).write();
