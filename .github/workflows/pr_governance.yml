@@ -93,115 +93,16 @@ jobs:
               return validated;
             }
 
-            async function getSameRepoManuallyLinkedIssues(prNodeId) {
-              // Best-effort same-repository manual-link detection.
-              // Scans issue timeline ConnectedEvent entries and looks for this PR as the source.
-              const found = new Map();
-
-              let issuesCursor = null;
-              let issuesHasNextPage = true;
-              let scannedPages = 0;
-              const maxIssuePages = 10; // safety cap
-
-              while (issuesHasNextPage && scannedPages < maxIssuePages) {
-                const query = `
-                  query($owner: String!, $repo: String!, $cursor: String) {
-                    repository(owner: $owner, name: $repo) {
-                      issues(
-                        first: 100,
-                        after: $cursor,
-                        states: [OPEN, CLOSED],
-                        orderBy: {field: UPDATED_AT, direction: DESC}
-                      ) {
-                        nodes {
-                          number
-                          timelineItems(first: 20, itemTypes: [CONNECTED_EVENT]) {
-                            nodes {
-                              __typename
-                              ... on ConnectedEvent {
-                                source {
-                                  __typename
-                                  ... on PullRequest {
-                                    id
-                                    number
-                                  }
-                                }
-                                subject {
-                                  __typename
-                                  ... on Issue {
-                                    id
-                                    number
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                        pageInfo {
-                          hasNextPage
-                          endCursor
-                        }
-                      }
-                    }
-                  }
-                `;
-
-                const res = await github.graphql(query, {
-                  owner,
-                  repo,
-                  cursor: issuesCursor,
-                });
-
-                const issuesConn = res.repository?.issues;
-                if (!issuesConn) break;
-
-                for (const issue of issuesConn.nodes || []) {
-                  for (const item of issue.timelineItems?.nodes || []) {
-                    if (
-                      item?.__typename === "ConnectedEvent" &&
-                      item?.source?.__typename === "PullRequest" &&
-                      item?.source?.id === prNodeId &&
-                      item?.subject?.__typename === "Issue"
-                    ) {
-                      found.set(item.subject.id, {
-                        id: item.subject.id,
-                        number: item.subject.number,
-                        repository: { nameWithOwner: `${owner}/${repo}` },
-                      });
-                    }
-                  }
-                }
-
-                issuesHasNextPage = issuesConn.pageInfo?.hasNextPage || false;
-                issuesCursor = issuesConn.pageInfo?.endCursor || null;
-                scannedPages += 1;
-              }
-
-              if (issuesHasNextPage) {
-                warnings.push(
-                  "Manual-link scan hit the page cap before exhausting all issues. Increase maxIssuePages if needed."
-                );
-              }
-
-              return [...found.values()];
-            }
-
             // 1) Detect linked issues
             // Policy passes if either:
             // - the PR body references at least one issue
             // - a same-repository manual sidebar link is detected
             const rawBodyReferences = extractIssueReferencesFromBody(body);
             const issuesMentionedInBody = await filterOutPullRequestsFromBodyReferences(rawBodyReferences);
-            const manualLinkedIssues = await getSameRepoManuallyLinkedIssues(pr.node_id);
-
-            const linkedIssues = uniqueById([
-              ...issuesMentionedInBody,
-              ...manualLinkedIssues,
-            ]);
-
-            if (linkedIssues.length === 0) {
+            
+            if (issuesMentionedInBody.length === 0) {
               errors.push(
-                "PR must reference at least one issue in the description or be linked to one issue through the sidebar."
+                "PR must reference at least one issue in the description."
               );
             }
 
@@ -229,24 +130,16 @@ jobs:
 
               if (crossRepoBodyRefs.length > 0) {
                 warnings.push(
-                  "Cross-repository issue references were found in the PR description. Manual sidebar-link validation only covers the current repository."
+                  "Cross-repository issue references were found in the PR description."
                 );
               }
-            }
-
-            if (manualLinkedIssues.length > 0) {
-              warnings.push(
-                "Manual sidebar links were detected only within the current repository. Cross-repository manual links are not fully validated by this workflow."
-              );
             }
 
             const summary = [];
             summary.push("## PR Governance Report");
             summary.push(`- PR #${pr.number}`);
             summary.push(`- Title: ${title}`);
-            summary.push(`- Issues referenced in PR body: ${issuesMentionedInBody.length}`);
-            summary.push(`- Same-repository manual-linked issues detected: ${manualLinkedIssues.length}`);
-            summary.push(`- Total linked issues accepted by policy: ${linkedIssues.length}`);
+            summary.push(`- Valid issues referenced in PR body: ${issuesMentionedInBody.length}`);
             summary.push(`- Files changed: ${pr.changed_files}`);
             summary.push(`- Additions: ${pr.additions}`);
             summary.push(`- Deletions: ${pr.deletions}`);
