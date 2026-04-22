@@ -85,7 +85,3 @@
 
 本行为准则改编自[贡献者公约](https://www.contributor-covenant.org), v2.0全文[https://www.contributor-covenant.org/version/2/0/code_of_conduct.html](https://www.contributor-covenant.org/version/2/0/code_of_conduct.html)。
 社区影响指南参考自[Mozilla 的行为准则执行框架](https://github.com/mozilla/diversity)。
-
-## 疑问咨询
-
-若对本准则有疑问，请联系 IvorySQL 团队：coc@ivorysql.org。
