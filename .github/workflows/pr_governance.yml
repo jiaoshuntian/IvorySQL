@@ -48,18 +48,49 @@ jobs:
 
             function extractIssueReferencesFromBody(text) {
               const refs = [];
-
+            
               for (const match of text.matchAll(issueRefRegex)) {
                 const repoName = match.groups?.repo || `${owner}/${repo}`;
                 const number = Number(match.groups?.number);
-
+            
                 refs.push({
                   repository: { nameWithOwner: repoName },
                   number,
                 });
               }
-
+            
               return refs;
+            }
+            
+            async function filterOutPullRequestsFromBodyReferences(refs) {
+              const validated = [];
+            
+              for (const ref of refs) {
+                try {
+                  const [refOwner, refRepo] = ref.repository.nameWithOwner.split("/");
+            
+                  const { data } = await github.rest.issues.get({
+                    owner: refOwner,
+                    repo: refRepo,
+                    issue_number: ref.number,
+                  });
+            
+                  // GitHub returns a pull_request field when the number belongs to a PR.
+                  if (!data.pull_request) {
+                    validated.push({
+                      id: data.node_id,
+                      number: data.number,
+                      repository: { nameWithOwner: ref.repository.nameWithOwner },
+                    });
+                  }
+                } catch (e) {
+                  warnings.push(
+                    `Could not validate whether ${ref.repository.nameWithOwner}#${ref.number} is an issue or a pull request.`
+                  );
+                }
+              }
+            
+              return validated;
             }
 
             async function getSameRepoManuallyLinkedIssues(prNodeId) {
@@ -159,7 +190,8 @@ jobs:
             // Policy passes if either:
             // - the PR body references at least one issue
             // - a same-repository manual sidebar link is detected
-            const issuesMentionedInBody = extractIssueReferencesFromBody(body);
+            const rawBodyReferences = extractIssueReferencesFromBody(body);
+            const issuesMentionedInBody = await filterOutPullRequestsFromBodyReferences(rawBodyReferences);
             const manualLinkedIssues = await getSameRepoManuallyLinkedIssues(pr.node_id);
 
             const linkedIssues = uniqueById([
