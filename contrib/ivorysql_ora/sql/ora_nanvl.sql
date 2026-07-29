@@ -1,0 +1,75 @@
+--
+-- NANVL
+--
+
+set extra_float_digits = 0;
+
+--
+-- normal values (binary_float / binary_double)
+--
+SELECT NANVL(1.5::binary_float, 2.5::binary_float);
+SELECT NANVL(1.5::binary_double, 2.5::binary_double);
+SELECT NANVL(-1.5::binary_float, 2.5::binary_float);
+SELECT NANVL(0::binary_double, 2.5::binary_double);
+
+--
+-- NaN path (core behavior)
+--
+SELECT NANVL('NaN'::binary_float, 2.5::binary_float);
+SELECT NANVL('NaN'::binary_double, 2.5::binary_double);
+-- expr2 is also NaN: only expr1 is checked
+SELECT NANVL('NaN'::binary_float, 'NaN'::binary_float);
+
+--
+-- Infinity is not NaN
+--
+SELECT NANVL('Infinity'::binary_float, 2.5::binary_float);
+SELECT NANVL('-Infinity'::binary_double, 2.5::binary_double);
+
+--
+-- NULL handling (STRICT: any NULL argument yields NULL)
+--
+SELECT NANVL(NULL::binary_float, 2.5::binary_float);
+SELECT NANVL(1.5::binary_float, NULL::binary_float);
+SELECT NANVL(NULL::binary_float, NULL::binary_float);
+
+--
+-- table column scenario (non-constant path)
+--
+CREATE TABLE nanvl_test_tbl (f1 binary_float, d1 binary_double);
+INSERT INTO nanvl_test_tbl VALUES
+	('NaN', 'NaN'),
+	(1.1, 2.2),
+	(NULL, NULL),
+	('Infinity', '-Infinity');
+SELECT f1, NANVL(f1, 0) FROM nanvl_test_tbl ORDER BY 1;
+SELECT d1, NANVL(d1, 0) FROM nanvl_test_tbl ORDER BY 1;
+DROP TABLE nanvl_test_tbl;
+
+--
+-- NUMBER overload
+--
+SELECT NANVL(1.23::number, 100);
+SELECT NANVL('NaN'::number, 100);
+SELECT NANVL(NULL::number, 100);
+SELECT NANVL(1.23::number, NULL);
+
+--
+-- bare literal / implicit conversion overload resolution
+--
+SELECT NANVL(1, 2), pg_typeof(NANVL(1, 2));
+SELECT NANVL(1.5, 2.5), pg_typeof(NANVL(1.5, 2.5));
+SELECT NANVL('NaN', 100), pg_typeof(NANVL('NaN', 100));
+
+--
+-- mismatched binary_float/binary_double: resolves via the existing
+-- IMPLICIT cast (binary_float -> binary_double), not an error
+--
+SELECT NANVL(1.5::binary_float, 2.5::binary_double), pg_typeof(NANVL(1.5::binary_float, 2.5::binary_double));
+
+--
+-- wrong number of arguments
+--
+SELECT NANVL(1.5::binary_float);--报错
+SELECT NANVL(1.5::binary_float, 2.5::binary_float, 3.5::binary_float);--报错
+SELECT NANVL();--报错
